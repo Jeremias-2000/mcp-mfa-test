@@ -109,6 +109,28 @@ Upstream requests have a 10-second timeout, do not follow redirects, and limit
 request/response sizes. The login route does not return upstream `Set-Cookie`
 headers to the browser.
 
+## Configure the VS Code MCP client
+
+The workspace configuration is in `.vscode/mcp.json`. It connects to the
+server's HTTP endpoint and prompts for the opaque session handle as a secret
+input; it does not contain the user's login password or the server's service
+credentials.
+
+For local development, start the server first, then sign in at
+`http://127.0.0.1:8000/auth/login` in a browser. Copy the displayed session
+handle. In VS Code, start or enable the `test-mcp-2` MCP server from the MCP
+Servers view/command and enter that handle when prompted for `mcpSessionId`.
+The client sends it as `X-Auth-Session-ID` on MCP requests. If the handle
+expires, sign in again and provide the new one.
+
+When the server is deployed, change the `url` in `.vscode/mcp.json` to the
+public HTTPS MCP endpoint, for example `https://mcp.example.com/mcp`, and
+ensure the matching `/auth/login` page is reachable at that host. Do not put
+`AUTH_SERVICE_BEARER_TOKEN`, `MONGODB_URI`, `AUTH_SESSION_ENCRYPTION_KEY`, or
+other server-side secrets in `mcp.json`; configure them in the deployed
+server's environment or secret manager. The user's login password is entered
+only on the server's login page, not in VS Code's MCP configuration.
+
 ## Local test walkthrough
 
 ### Prerequisites and start
@@ -124,7 +146,9 @@ headers to the browser.
    ```
 
 5. Open `http://127.0.0.1:8000/auth/login` in a browser. The default MCP HTTP
-   endpoint is `http://127.0.0.1:8000/mcp`.
+   endpoint is `http://127.0.0.1:8000/mcp`. Then configure the VS Code MCP
+   client as described above and enter the session handle shown by the login
+   page when prompted.
 
 ### Verify a regular user
 
@@ -179,14 +203,17 @@ history.
 
 ### Automated tests
 
-The session-store tests use a fake collection, so they do not require a running
-MongoDB instance:
+The unit tests use fake Mongo collections, mocked upstream HTTP responses, and
+an in-process ASGI harness, so they do not require MongoDB or authentication
+services to be running:
 
 ```powershell
 uv run python -m unittest discover -s tests
 ```
 
-They cover encrypted persistence, successful retrieval, unknown/expired
-handles, and tampered encrypted cookie data. Integration tests against real
-auth services and MongoDB are not included; run the manual walkthrough with
-development endpoints before deployment.
+The suite covers session encryption, expiry, tampering, and database-error
+mapping; configuration and error responses; login and MFA branches; request
+limits; upstream HTTP behavior; middleware authentication and request-body
+replay; route security headers; and server startup/lifespan wiring.
+Integration tests against real auth services and MongoDB are not included;
+run the manual walkthrough with development endpoints before deployment.

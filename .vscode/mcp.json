@@ -1,0 +1,33 @@
+{
+  "servers": {
+    "mcp-local": {
+      "type": "http",
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": {
+        "X-Auth-Session-ID": "${input:mcpSessionId}"
+      }
+    },
+    "mcp-homologacao": {
+      "type": "http",
+      "url": "https://mcp-homologacao.exemplo.com/mcp",
+      "headers": {
+        "X-Auth-Session-ID": "${input:mcpSessionId}"
+      }
+    },
+    "mcp-producao": {
+      "type": "http",
+      "url": "https://mcp.exemplo.com/mcp",
+      "headers": {
+        "X-Auth-Session-ID": "${input:mcpSessionId}"
+      }
+    }
+  },
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "mcpSessionId",
+      "description": "Identificador de sessão fornecido pelo servidor MCP",
+      "password": true
+    }
+  ]
+}

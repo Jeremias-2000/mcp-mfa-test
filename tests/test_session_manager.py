@@ -4,7 +4,14 @@ import unittest
 from datetime import datetime, timezone
 from typing import Any
 
-from test_mcp_2.auth_errors import SessionNotFoundError, SessionStoreDataError
+from pymongo.errors import PyMongoError
+
+from test_mcp_2.auth_errors import (
+    ConfigurationError,
+    SessionNotFoundError,
+    SessionStoreDataError,
+    SessionStoreUnavailableError,
+)
 from test_mcp_2.session_manager import MongoSessionStore
 
 
@@ -92,6 +99,96 @@ class MongoSessionStoreTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(SessionNotFoundError):
             await self.store.get_session(handle)
+
+    async def test_configuration_requires_uri_and_valid_encryption_key(self) -> None:
+        with self.assertRaises(ConfigurationError):
+            MongoSessionStore(
+                uri=None,
+                database="test",
+                collection="sessions",
+                encryption_key="valid-placeholder",
+            )
+        with self.assertRaises(ConfigurationError):
+            MongoSessionStore(
+                uri="mongodb://127.0.0.1:27017",
+                database="test",
+                collection="sessions",
+                encryption_key=None,
+            )
+        with self.assertRaises(ConfigurationError):
+            MongoSessionStore(
+                uri="mongodb://127.0.0.1:27017",
+                database="test",
+                collection="sessions",
+                encryption_key="not-a-32-byte-key",
+            )
+
+    async def test_database_failures_are_mapped_to_store_unavailable(self) -> None:
+        class FailingCollection:
+            async def insert_one(self, _document: dict[str, Any]) -> None:
+                raise PyMongoError("insert failed")
+
+            async def find_one(self, _query: dict[str, Any]) -> None:
+                raise PyMongoError("find failed")
+
+        self.store._collection = FailingCollection()
+        with self.assertRaises(SessionStoreUnavailableError):
+            await self.store.create_session(
+                cookies={"session_id": "secret"},
+                user_id="user-1",
+                user_type="regular",
+                ttl_seconds=60,
+            )
+        with self.assertRaises(SessionStoreUnavailableError):
+            await self.store.get_session("some-handle")
+
+    async def test_start_pings_database_and_creates_expiry_index(self) -> None:
+        class FakeAdmin:
+            async def command(self, command: str) -> None:
+                self.command_name = command
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.admin = FakeAdmin()
+
+        class IndexedCollection:
+            async def create_index(
+                self,
+                keys: list[tuple[str, int]],
+                **options: Any,
+            ) -> None:
+                self.keys = keys
+                self.options = options
+
+        original_client = self.store._client
+        client = FakeClient()
+        collection = IndexedCollection()
+        self.store._client = client
+        self.store._collection = collection
+        try:
+            await self.store.start()
+        finally:
+            self.store._client = original_client
+
+        self.assertEqual(client.admin.command_name, "ping")
+        self.assertEqual(collection.keys, [("expires_at", 1)])
+        self.assertEqual(collection.options, {"expireAfterSeconds": 0})
+
+    async def test_start_maps_database_failures(self) -> None:
+        class FailingAdmin:
+            async def command(self, _command: str) -> None:
+                raise PyMongoError("ping failed")
+
+        class FakeClient:
+            admin = FailingAdmin()
+
+        original_client = self.store._client
+        self.store._client = FakeClient()
+        try:
+            with self.assertRaises(SessionStoreUnavailableError):
+                await self.store.start()
+        finally:
+            self.store._client = original_client
 
 
 if __name__ == "__main__":
